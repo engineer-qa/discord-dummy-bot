@@ -135,7 +135,6 @@ async def generate_reply(channel_id: int, trigger: str) -> str:
     response = await claude.messages.create(
         model=MODEL,
         max_tokens=120,
-        temperature=1.0,
         system=build_system_prompt(),
         messages=[{
             "role": "user",
