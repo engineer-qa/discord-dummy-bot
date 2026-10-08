@@ -102,6 +102,7 @@ async def generate_reply(channel_id: int) -> str:
 @client.event
 async def on_ready():
     print(f"Залогинился как {client.user} — готов подкалывать")
+    print(f"Серверы: {[g.name for g in client.guilds]}; разрешённые каналы: {ALLOWED_CHANNELS or 'все'}")
 
 
 @client.event
@@ -121,7 +122,9 @@ async def on_message(msg: discord.Message):
         text += " [прикрепил файл/картинку]"
     history[msg.channel.id].append(f"{display_name(msg)}: {text}")
 
-    mentioned = client.user in msg.mentions
+    # тег бота как пользователя или тег его автоматической роли с тем же именем
+    my_roles = set(msg.guild.me.roles) if msg.guild else set()
+    mentioned = client.user in msg.mentions or any(r in my_roles for r in msg.role_mentions)
     ref = msg.reference.resolved if msg.reference else None
     replied_to_bot = isinstance(ref, discord.Message) and ref.author.id == client.user.id
     interject = (
@@ -133,6 +136,8 @@ async def on_message(msg: discord.Message):
 
     if not (mentioned or replied_to_bot or interject):
         return
+
+    print(f"[{msg.channel}] {msg.author.name}: тег={mentioned} ответ={replied_to_bot} влезть={interject}")
 
     if interject:
         last_interject[msg.channel.id] = time.time()
@@ -148,11 +153,15 @@ async def on_message(msg: discord.Message):
         return
 
     if not answer:
+        print("Claude вернул пустой ответ")
         return
-    if interject:
-        await msg.channel.send(answer[:2000])
-    else:
-        await msg.reply(answer[:2000], mention_author=False)
+    try:
+        if interject:
+            await msg.channel.send(answer[:2000])
+        else:
+            await msg.reply(answer[:2000], mention_author=False)
+    except discord.Forbidden:
+        print(f"Нет прав писать в канал {msg.channel} — проверь права бота/роли в этом канале")
 
 
 client.run(DISCORD_TOKEN)
