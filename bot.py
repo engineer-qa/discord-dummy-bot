@@ -15,7 +15,7 @@ load_dotenv()
 DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
 MODEL = os.getenv("MODEL", "claude-haiku-4-5")
 HISTORY_LEN = int(os.getenv("HISTORY_LEN", "30"))                    # сколько последних сообщений бот "видит"
-INTERJECT_CHANCE = float(os.getenv("INTERJECT_CHANCE", "0.03"))      # шанс влезть в разговор без тега
+INTERJECT_CHANCE = float(os.getenv("INTERJECT_CHANCE", "0.8"))       # шанс влезть в разговор без тега
 INTERJECT_COOLDOWN = int(os.getenv("INTERJECT_COOLDOWN", "600"))     # не чаще раза в 10 минут на канал
 USER_LIMIT_PER_HOUR = int(os.getenv("USER_LIMIT_PER_HOUR", "30"))    # защита кошелька
 ALLOWED_CHANNELS = {int(x) for x in os.getenv("ALLOWED_CHANNELS", "").split(",") if x.strip()}
