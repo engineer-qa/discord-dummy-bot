@@ -54,7 +54,9 @@ def build_system_prompt() -> str:
 
 SYSTEM_PROMPT = build_system_prompt()
 
-claude = AsyncAnthropic()  # ключ берётся из ANTHROPIC_API_KEY
+# ключ берётся из ANTHROPIC_API_KEY; для ключей без привязки к workspace нужен ещё ANTHROPIC_WORKSPACE_ID
+WORKSPACE_ID = os.getenv("ANTHROPIC_WORKSPACE_ID", "").strip()
+claude = AsyncAnthropic(default_headers={"anthropic-workspace-id": WORKSPACE_ID} if WORKSPACE_ID else None)
 intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
