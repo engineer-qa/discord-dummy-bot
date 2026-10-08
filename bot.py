@@ -60,8 +60,13 @@ user_calls: dict[int, deque] = defaultdict(deque)
 last_interject: dict[int, float] = defaultdict(float)
 
 
+def find_person(author: discord.abc.User) -> dict | None:
+    # в people.json ключом может быть числовой ID или юзернейм Discord
+    return PEOPLE.get(str(author.id)) or PEOPLE.get(author.name.lower())
+
+
 def display_name(msg: discord.Message) -> str:
-    person = PEOPLE.get(str(msg.author.id))
+    person = find_person(msg.author)
     return person["name"] if person else msg.author.display_name
 
 
