@@ -142,11 +142,14 @@ def clean_answer(text: str) -> str:
     return text
 
 
-thinking_disabled_supported = True  # новые модели по умолчанию "думают" — для коротких шуток это лишнее
+# новые модели по умолчанию "думают" — для коротких шуток это лишнее.
+# Пробуем варианты отключения по очереди; разные модели принимают разные (None = не передавать параметр).
+THINKING_OFF_OPTIONS = [{"type": "disabled"}, {"type": "between_tools"}, None]
+thinking_option_idx = 0
 
 
 async def generate_reply(channel_id: int, trigger: str) -> str:
-    global thinking_disabled_supported
+    global thinking_option_idx
     transcript = "\n".join(history[channel_id])
     params = dict(
         model=MODEL,
@@ -161,17 +164,19 @@ async def generate_reply(channel_id: int, trigger: str) -> str:
             ),
         }],
     )
-    if thinking_disabled_supported:
+    while True:
+        option = THINKING_OFF_OPTIONS[thinking_option_idx]
         try:
-            response = await claude.messages.create(**params, thinking={"type": "disabled"})
+            if option is None:
+                response = await claude.messages.create(**params)
+            else:
+                response = await claude.messages.create(**params, thinking=option)
+            break
         except (anthropic.BadRequestError, TypeError) as e:
-            if "thinking" not in str(e):
+            if option is None or "thinking" not in str(e):
                 raise
-            print(f"Модель не даёт отключить размышления, работаю с ними: {e}")
-            thinking_disabled_supported = False
-            response = await claude.messages.create(**params)
-    else:
-        response = await claude.messages.create(**params)
+            thinking_option_idx += 1
+            print(f"thinking={option} не подошёл, пробую {THINKING_OFF_OPTIONS[thinking_option_idx]}")
 
     answer = clean_answer("".join(b.text for b in response.content if b.type == "text"))
     if not answer:
