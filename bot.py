@@ -6,6 +6,7 @@ import time
 from collections import defaultdict, deque
 from pathlib import Path
 
+import anthropic
 import discord
 from anthropic import AsyncAnthropic
 from dotenv import load_dotenv
@@ -141,11 +142,15 @@ def clean_answer(text: str) -> str:
     return text
 
 
+thinking_disabled_supported = True  # новые модели по умолчанию "думают" — для коротких шуток это лишнее
+
+
 async def generate_reply(channel_id: int, trigger: str) -> str:
+    global thinking_disabled_supported
     transcript = "\n".join(history[channel_id])
-    response = await claude.messages.create(
+    params = dict(
         model=MODEL,
-        max_tokens=120,
+        max_tokens=1024,  # запас на случай, если модель всё же подумает; краткость задаёт промпт
         system=build_system_prompt(),
         messages=[{
             "role": "user",
@@ -156,7 +161,22 @@ async def generate_reply(channel_id: int, trigger: str) -> str:
             ),
         }],
     )
-    return clean_answer("".join(b.text for b in response.content if b.type == "text"))
+    if thinking_disabled_supported:
+        try:
+            response = await claude.messages.create(**params, thinking={"type": "disabled"})
+        except (anthropic.BadRequestError, TypeError) as e:
+            if "thinking" not in str(e):
+                raise
+            print(f"Модель не даёт отключить размышления, работаю с ними: {e}")
+            thinking_disabled_supported = False
+            response = await claude.messages.create(**params)
+    else:
+        response = await claude.messages.create(**params)
+
+    answer = clean_answer("".join(b.text for b in response.content if b.type == "text"))
+    if not answer:
+        print(f"Пустой ответ: stop_reason={response.stop_reason}, блоки={[b.type for b in response.content]}")
+    return answer
 
 
 REMEMBER_RE = re.compile(r"\bзапомни\b[\s,:-]*(.+)", re.IGNORECASE | re.DOTALL)
