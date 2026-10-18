@@ -21,8 +21,8 @@ FRESH_MINUTES = int(os.getenv("FRESH_MINUTES", "20"))        # старше эт
 MAX_CONTEXT = int(os.getenv("MAX_CONTEXT", "15"))            # максимум сообщений в контексте
 
 # --- когда влезать в разговор без тега ---
-INTERJECT_CHANCE = float(os.getenv("INTERJECT_CHANCE", "0.15"))
-INTERJECT_COOLDOWN = int(os.getenv("INTERJECT_COOLDOWN", "300"))   # не чаще раза в 5 минут на канал
+INTERJECT_CHANCE = float(os.getenv("INTERJECT_CHANCE", "0.3"))
+INTERJECT_COOLDOWN = int(os.getenv("INTERJECT_COOLDOWN", "60"))    # не чаще раза в минуту на канал
 ACTIVE_WINDOW = 300            # "живой разговор" = за последние 5 минут...
 ACTIVE_MIN_MESSAGES = 4        # ...хотя бы 4 сообщения...
 ACTIVE_MIN_AUTHORS = 2         # ...от хотя бы двух людей
