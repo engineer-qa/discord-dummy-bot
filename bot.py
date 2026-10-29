@@ -1,3 +1,4 @@
+import difflib
 import json
 import os
 import random
@@ -70,9 +71,16 @@ def build_system_prompt(channel_id: int) -> str:
         for p in PEOPLE.values()
     )
     facts = "\n".join(f"- {x}" for x in MEMORY["facts"]) or "(пока пусто)"
-    liked = "\n".join(f"- {x}" for x in MEMORY["good_jokes"][-12:]) or "(пока пусто)"
-    own = [e["text"] for e in history[channel_id] if e["is_bot"]][-8:]
-    own_recent = "\n".join(f"- {x}" for x in own) or "(пока ничего)"
+    banned = banned_openings(channel_id)
+    # удачные реплики, но без тех, что начинаются с заезженного шаблона, — чтобы не закреплять его
+    liked_list = [x for x in MEMORY["good_jokes"] if opening_shape(x) not in banned and not LAUGH_RE.match(x)]
+    liked = "\n".join(f"- {x}" for x in liked_list[-8:]) or "(пока пусто)"
+    own_recent = "\n".join(f"- {x}" for x in own_recent_replies(channel_id)) or "(пока ничего)"
+    banned_block = (
+        "СЕЙЧАС ЗАПРЕЩЕНО начинать реплику так (ты уже заездила эти начала): "
+        + ", ".join(f"«{b}»" for b in banned).replace("СМЕХ", "смех вроде ахах/хаха").replace("ИМЯ", "обращение по имени")
+        if banned else ""
+    )
 
     return f"""Ты — Елена Взрослая, своя в дружеской компании в Discord. Пишешь как живой человек в чате с друзьями: коротко, эмоционально, по-простому. Не ассистент, не лектор.
 Та самая Елена Взрослая, которую Артур годами упоминал и которую никто не видел. Создал тебя Слава.
@@ -94,7 +102,12 @@ def build_system_prompt(channel_id: int) -> str:
 ХАРАКТЕР:
 - Своя, прямолинейная, с юмором. Не токсичишь и не язвишь постоянно — подкол изредка и по-дружески.
 - Мат — нормально, это обычная речь в этом чате.
-- Можешь обращаться по кличкам из списка, но не в каждой реплике.
+- Можешь обращаться по кличкам из списка, но редко и НЕ в начале реплики.
+
+РАЗНООБРАЗИЕ — СТРОГО:
+- НЕ начинай реплики со смеха ("ахах", "хаха") и с обращения по имени. Смех — максимум раз в 5–6 реплик.
+- Каждая реплика должна быть устроена по-своему: то вопрос, то утверждение, то одно слово, то реакция. Никакой одной схемы.
+- Не превращай всё в "ты опять...?" — это заезженный ход.
 - Местные словечки, изредка и к месту: "валет"/"валетон" (обращение или подкол), "та едрать" (как "блин").
 - Изредка, если в тему, можешь обыграть, что ты та самая Елена Взрослая, знакомая Катюхи с Киева и Виктора Назарова.
 
@@ -117,8 +130,9 @@ def build_system_prompt(channel_id: int) -> str:
 Твои реплики, которые понравились чату (держи этот уровень, но не повторяй):
 {liked}
 
-Твои последние реплики (НЕ повторяй их мысли и формулировки):
+Твои последние реплики — это НЕ образец. Не копируй ни их начало, ни структуру, ни мысли:
 {own_recent}
+{banned_block}
 
 Примеры того, как ты общаешься (реплика → твой ответ):
 {STYLE_EXAMPLES}
@@ -204,6 +218,78 @@ def clean_answer(text: str) -> str:
     return text.strip().strip('"«»').strip()
 
 
+# --- защита от самокопирования ("ахах, Слава, ты ...?" по кругу) ---
+LAUGH_RE = re.compile(r"^(а?х[ах]{2,}|х[еэ]х[еэ]*|лол|ору|кек|пхах\w*)[\s,.!?…)]*", re.IGNORECASE)
+RECENT_FOR_REPEAT = 10      # с какими последними своими репликами сравнивать
+SIMILARITY_LIMIT = 0.55     # насколько похоже считается повтором (0..1)
+
+
+def _all_names() -> set[str]:
+    names = set()
+    for p in PEOPLE.values():
+        for part in re.split(r"[(),]", p["name"]):
+            for w in part.split():
+                if len(w) > 2:
+                    names.add(w.lower())
+    return names | {"елена", "елена взрослая"}
+
+
+NAMES = _all_names()
+
+
+def _words(text: str) -> list[str]:
+    return re.findall(r"[\wёЁіїєґ']+", text.lower())
+
+
+def opening_shape(text: str) -> str:
+    """Схема начала реплики: 'СМЕХ', 'ИМЯ' или первое слово. Пример: 'ахах, Слава, ты' -> 'СМЕХ ИМЯ'."""
+    shape = []
+    for w in _words(text)[:3]:
+        if LAUGH_RE.match(w):
+            shape.append("СМЕХ")
+        elif w in NAMES:
+            shape.append("ИМЯ")
+        else:
+            shape.append(w)
+        if len(shape) == 2:
+            break
+    return " ".join(shape)
+
+
+def own_recent_replies(channel_id: int) -> list[str]:
+    return [e["text"] for e in history[channel_id] if e["is_bot"]][-RECENT_FOR_REPEAT:]
+
+
+def banned_openings(channel_id: int) -> list[str]:
+    """Начала, которые уже повторялись 2+ раза в последних репликах — их запрещаем."""
+    recent = own_recent_replies(channel_id)
+    counts: dict[str, int] = defaultdict(int)
+    for r in recent:
+        shape = opening_shape(r)
+        counts[shape] += 1
+        counts[shape.split(" ")[0]] += 1  # и первое слово отдельно
+    return sorted({s for s, c in counts.items() if c >= 2 and s})
+
+
+def is_repetitive(answer: str, channel_id: int) -> bool:
+    shape = opening_shape(answer)
+    banned = banned_openings(channel_id)
+    if shape in banned or shape.split(" ")[0] in banned:
+        return True
+    a = answer.lower()
+    return any(difflib.SequenceMatcher(None, a, r.lower()).ratio() >= SIMILARITY_LIMIT
+               for r in own_recent_replies(channel_id))
+
+
+def strip_template_opening(answer: str) -> str:
+    """Крайняя мера: срезать 'ахах, Слава,' в начале."""
+    text = LAUGH_RE.sub("", answer).lstrip()
+    m = re.match(r"([\wёЁіїєґ']+)\s*,\s*", text)
+    if m and m.group(1).lower() in NAMES:
+        text = text[m.end():]
+    return text or answer
+
+
 MAX_CHARS_INTERJECT = int(os.getenv("MAX_CHARS_INTERJECT", "120"))
 MAX_CHARS_DIRECT = int(os.getenv("MAX_CHARS_DIRECT", "220"))
 
@@ -245,13 +331,40 @@ THINKING_OFF_OPTIONS = [{"type": "disabled"}, {"type": "between_tools"}, None]
 thinking_option_idx = 0
 
 
-async def ask_claude(channel_id: int, user_content: str) -> str:
+async def generate_answer(channel_id: int, request: str, interject: bool) -> str:
+    """Ответ модели + проверка на самокопирование: один повтор попытки, потом крайние меры."""
+    messages = [{"role": "user", "content": request}]
+    answer = await ask_claude(channel_id, messages)
+    if not answer or (interject and answer.upper().startswith("SKIP")) or not is_repetitive(answer, channel_id):
+        return answer
+
+    print(f"Похоже на прошлые реплики, переписываю: {answer!r}")
+    messages += [
+        {"role": "assistant", "content": answer},
+        {"role": "user", "content": (
+            "Это почти копия твоих прошлых реплик. Напиши совсем по-другому: другое начало, другая структура, "
+            "без смеха и без обращения по имени в начале. Только саму реплику."
+            + (" Если сказать нечего — SKIP." if interject else "")
+        )},
+    ]
+    retry = await ask_claude(channel_id, messages)
+    if retry and not is_repetitive(retry, channel_id):
+        return retry
+    if interject:
+        print("Снова повтор — лучше промолчу")
+        return "SKIP"
+    fixed = strip_template_opening(retry or answer)
+    print(f"Снова повтор — срезала шаблонное начало: {fixed!r}")
+    return fixed
+
+
+async def ask_claude(channel_id: int, messages: list[dict]) -> str:
     global thinking_option_idx
     params = dict(
         model=MODEL,
         max_tokens=300,  # запас; краткость задаёт промпт + trim_answer
         system=build_system_prompt(channel_id),
-        messages=[{"role": "user", "content": user_content}],
+        messages=messages,
     )
     while True:
         option = THINKING_OFF_OPTIONS[thinking_option_idx]
@@ -404,14 +517,14 @@ async def on_message(msg: discord.Message):
 
     try:
         async with msg.channel.typing():
-            answer = await ask_claude(msg.channel.id, build_request(msg, reply_target, interject))
+            answer = await generate_answer(msg.channel.id, build_request(msg, reply_target, interject), interject)
     except Exception as e:
         print(f"Ошибка Claude API: {e}")
         return
 
     if not answer:
         return
-    if interject and answer.strip().upper().startswith("SKIP"):
+    if answer.strip().upper().startswith("SKIP"):
         print("Решила промолчать")
         return
     trimmed = trim_answer(answer, interject)
